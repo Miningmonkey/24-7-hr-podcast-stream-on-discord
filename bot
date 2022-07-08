@@ -1,0 +1,106 @@
+import datetime
+from email import message
+import discord
+from discord import option
+from discord.ext import tasks
+from dateutil import tz
+from discord.utils import basic_autocomplete
+import requests
+import logging
+import json 
+from google.cloud import firestore
+
+
+db = firestore.AsyncClient(project="racksonracks")
+
+async def init(guild_id):
+    pers_ref = db.collection("persistent_views").document(str(guild_id))
+    res = await pers_ref.get()
+    if res.exists:
+        print(f"Document data: {res.to_dict()}")
+    else:
+        print("No data!")
+    return res.to_dict()
+
+async def add_persistent_view(guild_id, level, role_id, message_id):
+    guild_ref = db.collection("persistent_views").document(str(guild_id))
+    data = {str(level):{ "role_id": role_id, "message_id": message_id}}
+    await guild_ref.set(data, merge=True)
+
+content = json.load(open("./content.json"))
+logging.basicConfig(level=logging.DEBUG)
+def create_level_embed(level: int):
+    embed = discord.Embed(
+        title=content[str(level)]["title"],
+        description=content[str(level)]["intro"] + "\n\n*" + content[str(level)]["prompt"] + "*",
+        color=discord.Colour.blurple(), # Pycord provides a class with default colors you can choose from
+    )
+    return embed
+class LevelModal(discord.ui.Modal):
+    def __init__(self, level:int, role:discord.Role, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.level = level
+        self.role = role
+        try:
+            self.add_item(discord.ui.InputText(label="Answer"))
+        except Exception as e:
+            print(e)
+
+    async def callback(self, interaction: discord.Interaction):
+        answer = self.children[0].value
+        print(answer)
+        if(answer == content[str(self.level)]["answer"]):
+            try:
+                await interaction.user.add_roles(self.role)
+            except Exception as e:
+                print(e)
+                await interaction.response.send_message("Role assignment failed. Check permissions!",ephemeral=True)
+                return
+            try:
+                await interaction.response.send_message(content[str(self.level)]["outro"],ephemeral=True)
+            except Exception as e:
+                print(e)
+                await interaction.response.send_message("Message send failed. Check permissions!",ephemeral=True)
+                return
+        else:
+            await interaction.response.send_message("Incorrect. Try again!",ephemeral=True)
+            
+
+class PrologueView(discord.ui.View):
+    def __init__(self, level: int, role: discord.Role, *args, **kwargs) -> None:
+        super().__init__(timeout=None,*args, **kwargs)
+        self.level = level
+        self.role = role
+
+    @discord.ui.button(label="Start your journey",custom_id="persistent:start_your_journey")
+    async def button_callback(self, button, interaction):
+        try:
+            await interaction.user.add_roles(self.role)
+        except Exception as e:
+            print(e)
+            await interaction.response.send_message("Role assignment failed. Check permissions!",ephemeral=True)
+            return
+        try:
+            await interaction.response.send_message(content[str(self.level)]["outro"],ephemeral=True)
+        except Exception as e:
+            print(e)
+            await interaction.response.send_message("Message send failed. Check permissions!",ephemeral=True)
+            return
+        # except:
+            
+
+
+class LevelView(discord.ui.View):
+    def __init__(self, level: int, role: discord.Role, *args, **kwargs) -> None:
+        super().__init__(timeout=None,*args, **kwargs)
+        self.level = level
+        self.role = role
+
+    @discord.ui.button(label="Enter Answer",custom_id="persistent:enter_answer")
+    async def button_callback(self, button, interaction):
+        await interaction.response.send_modal(LevelModal(level=self.level, role=self.role,title=content[str(self.level)]["title"]))
+
+
+
+
+
